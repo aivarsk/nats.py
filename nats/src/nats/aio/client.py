@@ -431,8 +431,6 @@ class Client:
         :param disconnected_cb: Callback to report disconnection from NATS.
         :param closed_cb: Callback to report when client stops reconnection to NATS.
         :param discovered_server_cb: Callback to report when a new server joins the cluster.
-        :param pending_size: Max size of the pending buffer for publishing commands.
-        :param flush_timeout: Max duration to wait for a forced flush to occur.
         :param skip_subject_validation: Disable client-side validation of subjects,
             reply subjects and queue groups on publish, subscribe and request.
             Not recommended: the performance gain is minimal and it removes the
@@ -772,8 +770,9 @@ class Client:
             return
         self._status = Client.CLOSED
 
-        # Flush any remaining data
-        await self._transport.drain()
+        # For reviewers:
+        # _flush_pending here did not work anyway since it checked for is_connected
+        # which was always false because we just set the self._status
 
         # Avoid cancelling the current task when _close is called from within
         # one of these tasks (e.g. _read_loop via _process_op_err), otherwise
@@ -809,7 +808,10 @@ class Client:
 
         if self._current_server is not None and self._transport:
             # In case there is any pending data at this point, flush before disconnecting.
-            await self._transport.drain()
+            try:
+                await self._transport.drain()
+            except ConnectionResetError:
+                pass
 
         # Cleanup subscriptions since not reconnecting so no need
         # to replay the subscriptions anymore.
