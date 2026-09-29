@@ -1680,21 +1680,17 @@ class Client:
                         max_msgs = sub._max_msgs - sub._received
 
                     sub_cmd = prot_command.sub_cmd(sub._subject, sub._queue, sid)
-                    self._transport.write(sub_cmd)
+                    await self._send_command(sub_cmd)
 
                     if max_msgs > 0:
                         unsub_cmd = prot_command.unsub_cmd(sid, max_msgs)
-                        self._transport.write(unsub_cmd)
+                        await self._send_command(unsub_cmd)
 
                 for sid in subs_to_remove:
                     self._subs.pop(sid)
 
                 await self._transport.drain()
 
-                # Flush pending data before continuing in connected status.
-                # FIXME: Could use future here and wait for an error result
-                # to bail earlier in case there are errors in the connection.
-                await self._transport.drain()
                 self._status = Client.CONNECTED
                 await self.flush()
                 if self._reconnected_cb is not None:
@@ -2215,8 +2211,7 @@ class Client:
 
         assert self._transport
         connect_cmd = self._connect_command()
-        self._transport.write(connect_cmd)
-        await self._transport.drain()
+        await self._send_command(connect_cmd)
         if self.options["verbose"]:
             future = self._transport.readline()
             next_op = await asyncio.wait_for(future, self.options["connect_timeout"])
@@ -2232,8 +2227,7 @@ class Client:
                 # await self._process_err(err_msg)
                 raise errors.Error("nats: " + err_msg.rstrip("\r\n"))
 
-        self._transport.write(PING_PROTO)
-        await self._transport.drain()
+        await self._send_command(PING_PROTO)
 
         future = self._transport.readline()
         next_op = await asyncio.wait_for(future, self.options["connect_timeout"])
