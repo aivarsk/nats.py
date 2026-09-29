@@ -1328,18 +1328,6 @@ class ClientTest(SingleServerTestCase):
         await nc.close()
 
     @async_test
-    async def test_pending_data_size_tracking(self):
-        nc = NATS()
-        await nc.connect()
-        largest_pending_data_size = 0
-        for i in range(0, 100):
-            await nc.publish("example", b"A" * 100000)
-            if nc.pending_data_size > 0:
-                largest_pending_data_size = nc.pending_data_size
-        self.assertTrue(largest_pending_data_size > 0)
-        await nc.close()
-
-    @async_test
     async def test_close(self):
         nc = NATS()
 
@@ -1404,7 +1392,7 @@ class ClientTest(SingleServerTestCase):
         await nc.flush()
 
         # Cancel internal tasks to simulate Python < 3.11 SIGINT behavior.
-        for task in [nc._reading_task, nc._flusher_task, nc._ping_interval_task]:
+        for task in [nc._reading_task, nc._ping_interval_task]:
             if task and not task.done():
                 task.cancel()
 
@@ -2777,7 +2765,7 @@ class ClusterDiscoveryReconnectTest(ClusteringDiscoveryAuthTestCase):
         payload = ("A" * 1025).encode()
         await nc.request("foo", payload)
         await nc.publish("foo", payload)
-        self.assertEqual(nc._pending_data_size, 0)
+        self.assertEqual(nc.pending_data_size, 0)
         await nc.close()
 
         self.assertTrue(nc.is_closed)
@@ -2837,7 +2825,7 @@ class ClusterDiscoveryReconnectTest(ClusteringDiscoveryAuthTestCase):
         for i in range(0, 1000):
             await nc.request("foo", payload)
             await nc.publish("foo", payload)
-            self.assertEqual(nc._pending_data_size, 0)
+            self.assertEqual(nc.pending_data_size, 0)
 
         await nc.close()
         self.assertTrue(nc.is_closed)
