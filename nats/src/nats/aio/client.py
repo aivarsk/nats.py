@@ -968,11 +968,6 @@ class Client:
             raise errors.ConnectionDrainingError
 
         payload_size = len(payload)
-        if not self.is_connected:
-            if self._max_pending_size <= 0 or payload_size + self._pending_data_size > self._max_pending_size:
-                # Cannot publish during a reconnection when the buffering is disabled,
-                # or if pending buffer is already full.
-                raise errors.OutboundBufferLimitError
 
         if payload_size > self._max_payload:
             raise errors.MaxPayloadError
