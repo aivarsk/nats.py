@@ -23,8 +23,10 @@ import logging
 import re
 import ssl
 import string
+import sys
 import time
 from collections import UserString
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -58,6 +60,15 @@ from .subscription import (
     Subscription,
 )
 from .transport import TcpTransport, Transport, WebSocketTransport
+
+# Supported Python versions might not have the fix for a re-entrant drain
+# https://github.com/python/cpython/issues/74116
+# make it no-op for fixed versions
+if sys.version_info >= (3, 10, 8):
+    from contextlib import nullcontext
+    DrainLock = nullcontext
+else:
+    DrainLock = asyncio.Lock
 
 try:
     from importlib.metadata import version
@@ -381,6 +392,7 @@ class Client:
             "reconnects": 0,
             "errors_received": 0,
         }
+        self._transport_drain_lock: Optional[AbstractAsyncContextManager] = None
 
     async def connect(
         self,
@@ -589,6 +601,7 @@ class Client:
         if self.options["dont_randomize"] is False:
             shuffle(self._server_pool)
 
+        self._transport_drain_lock = DrainLock()
         while True:
             try:
                 await self._select_next_server()
@@ -764,6 +777,11 @@ class Client:
         """
         await self._close(Client.CLOSED)
 
+
+    async def _transport_drain(self):
+        with self._transport_drain_lock:
+            await self._transport.drain()
+
     async def _close(self, status: int, do_cbs: bool = True) -> None:
         if self.is_closed:
             self._status = status
@@ -809,7 +827,7 @@ class Client:
         if self._current_server is not None and self._transport:
             # In case there is any pending data at this point, flush before disconnecting.
             try:
-                await self._transport.drain()
+                await self._transport_drain()
             except ConnectionResetError:
                 pass
 
@@ -1235,7 +1253,7 @@ class Client:
         # Python < 3.11 SIGINT handling), fall back to a direct flush
         # since a PING/PONG round-trip requires the read loop.
         if self._reading_task is None or self._reading_task.done():
-            await self._transport.drain()
+            await self._transport_drain()
             return
 
         future: asyncio.Future = asyncio.Future()
@@ -1402,7 +1420,7 @@ class Client:
     async def _send_command(self, cmd: bytes) -> None:
         try:
             self._transport.write(cmd)
-            await self._transport.drain()
+            await self._transport_drain()
         except OSError as e:
             await self._error_cb(e)
             await self._process_op_err(e)
@@ -1689,7 +1707,7 @@ class Client:
                 for sid in subs_to_remove:
                     self._subs.pop(sid)
 
-                await self._transport.drain()
+                await self._transport_drain()
 
                 self._status = Client.CONNECTED
                 await self.flush()
@@ -2195,7 +2213,7 @@ class Client:
             and self._current_server.uri.scheme != "ws"
         ):
             if not handshake_first:
-                await self._transport.drain()  # just in case something is left
+                await self._transport_drain()  # just in case something is left
 
                 # connect to transport via tls
                 await self._transport.connect_tls(
