@@ -1433,18 +1433,6 @@ class ClientTest(SingleServerTestCase):
         await nc.close()
 
     @async_test
-    async def test_pending_data_size_tracking(self):
-        nc = NATS()
-        await nc.connect()
-        largest_pending_data_size = 0
-        for i in range(0, 100):
-            await nc.publish("example", b"A" * 100000)
-            if nc.pending_data_size > 0:
-                largest_pending_data_size = nc.pending_data_size
-        self.assertTrue(largest_pending_data_size > 0)
-        await nc.close()
-
-    @async_test
     async def test_close(self):
         nc = NATS()
 
@@ -1509,7 +1497,7 @@ class ClientTest(SingleServerTestCase):
         await nc.flush()
 
         # Cancel internal tasks to simulate Python < 3.11 SIGINT behavior.
-        for task in [nc._reading_task, nc._flusher_task, nc._ping_interval_task]:
+        for task in [nc._reading_task, nc._ping_interval_task]:
             if task and not task.done():
                 task.cancel()
 
@@ -1948,155 +1936,6 @@ class ClientReconnectTest(MultiServerAuthTestCase):
             if not task.done():
                 pending_tasks_count += 1
         self.assertTrue(pending_tasks_count <= expected_tasks)
-
-    @async_test
-    async def test_pending_data_size_flush_reconnect(self):
-        nc = NATS()
-
-        disconnected_count = 0
-        reconnected_count = 0
-        closed_count = 0
-        err_count = 0
-
-        async def disconnected_cb():
-            nonlocal disconnected_count
-            disconnected_count += 1
-
-        async def reconnected_cb():
-            nonlocal reconnected_count
-            reconnected_count += 1
-
-        async def closed_cb():
-            nonlocal closed_count
-            closed_count += 1
-
-        options = {
-            "servers": [
-                "nats://foo:bar@127.0.0.1:4223",
-                "nats://hoge:fuga@127.0.0.1:4224",
-            ],
-            "dont_randomize": True,
-            "disconnected_cb": disconnected_cb,
-            "closed_cb": closed_cb,
-            "reconnected_cb": reconnected_cb,
-            "reconnect_time_wait": 0.01,
-        }
-        await nc.connect(**options)
-        largest_pending_data_size = 0
-        post_flush_pending_data = None
-        done_once = False
-
-        async def cb(msg):
-            pass
-
-        await nc.subscribe("example.*", cb=cb)
-
-        for i in range(0, 200):
-            await nc.publish(f"example.{i}", b"A" * 20)
-            if nc.pending_data_size > 0:
-                largest_pending_data_size = nc.pending_data_size
-            if nc.pending_data_size > 100:
-                # Stop the first server and connect to another one asap.
-                if not done_once:
-                    await nc.flush(2)
-                    post_flush_pending_data = nc.pending_data_size
-                    await asyncio.get_running_loop().run_in_executor(None, self.server_pool[0].stop)
-                    done_once = True
-
-        self.assertTrue(largest_pending_data_size > 0)
-        self.assertTrue(post_flush_pending_data == 0)
-
-        # Confirm we have reconnected eventually
-        for i in range(0, 10):
-            await asyncio.sleep(0)
-            await asyncio.sleep(0.2)
-            await asyncio.sleep(0)
-        self.assertEqual(1, nc.stats["reconnects"])
-        try:
-            await nc.flush(2)
-        except nats.errors.TimeoutError:
-            # If disconnect occurs during this flush, then we will have a timeout here
-            pass
-        finally:
-            await nc.close()
-
-        self.assertTrue(disconnected_count >= 1)
-        self.assertTrue(closed_count >= 1)
-
-    @async_test
-    async def test_custom_flush_queue_reconnect(self):
-        nc = NATS()
-
-        disconnected_count = 0
-        reconnected_count = 0
-        closed_count = 0
-        err_count = 0
-
-        async def disconnected_cb():
-            nonlocal disconnected_count
-            disconnected_count += 1
-
-        async def reconnected_cb():
-            nonlocal reconnected_count
-            reconnected_count += 1
-
-        async def closed_cb():
-            nonlocal closed_count
-            closed_count += 1
-
-        options = {
-            "servers": [
-                "nats://foo:bar@127.0.0.1:4223",
-                "nats://hoge:fuga@127.0.0.1:4224",
-            ],
-            "dont_randomize": True,
-            "disconnected_cb": disconnected_cb,
-            "closed_cb": closed_cb,
-            "reconnected_cb": reconnected_cb,
-            "flusher_queue_size": 100,
-            "reconnect_time_wait": 0.01,
-        }
-        await nc.connect(**options)
-        largest_pending_data_size = 0
-        post_flush_pending_data = None
-        done_once = False
-
-        async def cb(msg):
-            pass
-
-        await nc.subscribe("example.*", cb=cb)
-
-        for i in range(0, 500):
-            await nc.publish(f"example.{i}", b"A" * 20)
-            if nc.pending_data_size > 0:
-                largest_pending_data_size = nc.pending_data_size
-            if nc.pending_data_size > 100:
-                # Stop the first server and connect to another one asap.
-                if not done_once:
-                    await nc.flush(2)
-                    post_flush_pending_data = nc.pending_data_size
-                    await asyncio.get_running_loop().run_in_executor(None, self.server_pool[0].stop)
-                    done_once = True
-
-        self.assertTrue(largest_pending_data_size > 0)
-        self.assertTrue(post_flush_pending_data == 0)
-
-        # Confirm we have reconnected eventually
-        for i in range(0, 10):
-            await asyncio.sleep(0)
-            await asyncio.sleep(0.2)
-            await asyncio.sleep(0)
-        self.assertEqual(1, nc.stats["reconnects"])
-        try:
-            await nc.flush(2)
-        except nats.errors.TimeoutError:
-            # If disconnect occurs during this flush, then we will have a timeout here
-            pass
-        finally:
-            await nc.close()
-
-        self.assertTrue(disconnected_count >= 1)
-        self.assertTrue(closed_count >= 1)
 
     @async_test
     async def test_auth_reconnect(self):
@@ -2882,7 +2721,7 @@ class ClusterDiscoveryReconnectTest(ClusteringDiscoveryAuthTestCase):
         payload = ("A" * 1025).encode()
         await nc.request("foo", payload)
         await nc.publish("foo", payload)
-        self.assertEqual(nc._pending_data_size, 0)
+        self.assertEqual(nc.pending_data_size, 0)
         await nc.close()
 
         self.assertTrue(nc.is_closed)
@@ -2942,7 +2781,7 @@ class ClusterDiscoveryReconnectTest(ClusteringDiscoveryAuthTestCase):
         for i in range(0, 1000):
             await nc.request("foo", payload)
             await nc.publish("foo", payload)
-            self.assertEqual(nc._pending_data_size, 0)
+            self.assertEqual(nc.pending_data_size, 0)
 
         await nc.close()
         self.assertTrue(nc.is_closed)
