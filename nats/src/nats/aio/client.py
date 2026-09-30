@@ -1246,10 +1246,9 @@ class Client:
             raise errors.ConnectionClosedError
 
         # If the internal loops are dead (e.g. cancelled externally by
-        # Python < 3.11 SIGINT handling), fall back to a direct flush
-        # since a PING/PONG round-trip requires the read loop.
+        # Python < 3.11 SIGINT handling), bail out since a PING/PONG
+        # round-trip requires the read loop.
         if self._reading_task is None or self._reading_task.done():
-            await self._transport_drain()
             return
 
         future: asyncio.Future = asyncio.Future()
@@ -1702,8 +1701,6 @@ class Client:
 
                 for sid in subs_to_remove:
                     self._subs.pop(sid)
-
-                await self._transport_drain()
 
                 self._status = Client.CONNECTED
                 await self.flush()
