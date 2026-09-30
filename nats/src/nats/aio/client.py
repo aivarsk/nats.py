@@ -615,6 +615,8 @@ class Client:
                     continue
                 self._err = e
                 raise e
+            except PermissionError:
+                raise
             except (OSError, errors.Error, asyncio.TimeoutError) as e:
                 self._err = e
                 await self._error_cb(e)
@@ -787,10 +789,6 @@ class Client:
             self._status = status
             return
         self._status = Client.CLOSED
-
-        # For reviewers:
-        # _flush_pending here did not work anyway since it checked for is_connected
-        # which was always false because we just set the self._status
 
         # Avoid cancelling the current task when _close is called from within
         # one of these tasks (e.g. _read_loop via _process_op_err), otherwise
@@ -1719,6 +1717,8 @@ class Client:
                 self._err = e
                 await self.close()
                 break
+            except PermissionError:
+                raise
             except (OSError, errors.Error, asyncio.TimeoutError) as e:
                 self._err = e
                 await self._error_cb(e)
