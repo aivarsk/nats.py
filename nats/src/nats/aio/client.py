@@ -781,7 +781,10 @@ class Client:
 
 
     async def _transport_drain(self):
-        with self._transport_drain_lock:
+        """
+        Safe transport drain, either re-entrant or serialized
+        """
+        async with self._transport_drain_lock:
             await self._transport.drain()
 
     async def _close(self, status: int, do_cbs: bool = True) -> None:
